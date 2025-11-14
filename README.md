@@ -1,13 +1,13 @@
 # MusicStreamAnalysis
 Music Streaming Analytics is an interactive, data-driven Streamlit application designed to analyze, visualize, and explore music streaming behavior across multiple dimensions such as songs, artists, genres, demographics, devices, and time trends. Designed with rich visuals, flexible search tools, ML integration placeholders, and full data management support.
-##⭐ Features:
-##📊 Interactive Dashboard
+## ⭐ Features:
+## 📊 Interactive Dashboard
 - Total streams, unique songs, unique artists
 - Average song duration
 - Streams by genre and country
 - Daily streaming time-series trends
 
-##🔍 Search & Explore
+## 🔍 Search & Explore
 - Search and analyze data by:
 - Song
 - Artist
@@ -20,17 +20,17 @@ Includes:
 - Top 10 most-streamed artists
 - Trending now (last 7 days)
 
-##⏰ Temporal Analysis
+## ⏰ Temporal Analysis
 - Streams by time of day
 - Streams by day of week
 - Monthly streaming trends
 
-##👥 Demographic Analysis
+## 👥 Demographic Analysis
 - Streams broken down by age group
 - Country-wise distribution
 - Genre preference across age demographics
 
-##🎯 Behavioral Metrics
+## 🎯 Behavioral Metrics
 - Device usage distribution
 - Average listening duration per device
 - Sunburst chart of listening patterns by device & time of day
@@ -40,7 +40,7 @@ Includes:
 - Peak listening time
 - Most used device
 
-##🤖 ML Integration (Demo Mode)
+## 🤖 ML Integration (Demo Mode)
 - Supports selection of ML providers:
 - OpenAI
 - Anthropic Claude
@@ -77,7 +77,7 @@ pip install streamlit pandas numpy plotly
 ## Run the App
 streamlit run main.py
 
-##📁 Project Structure
+## 📁 Project Structure
 .
 ├── main.py
 ├── README.md
