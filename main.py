@@ -4,6 +4,9 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+import certifi
 
 # Page configuration
 st.set_page_config(
@@ -106,6 +109,117 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# MongoDB Connection Functions
+@st.cache_resource
+def init_mongodb_connection():
+    """Initialize MongoDB connection"""
+    try:
+        if 'mongo_uri' in st.session_state and st.session_state.mongo_uri:
+            uri = st.session_state.mongo_uri
+            
+            # Check if it's a local connection (no SSL needed)
+            if 'localhost' in uri or '127.0.0.1' in uri:
+                client = MongoClient(
+                    uri,
+                    serverSelectionTimeoutMS=5000
+                )
+            else:
+                # Cloud connection (MongoDB Atlas) - use SSL
+                client = MongoClient(
+                    uri,
+                    serverSelectionTimeoutMS=5000,
+                    tlsCAFile=certifi.where()
+                )
+            
+            # Test connection
+            client.admin.command('ping')
+            return client
+        return None
+    except Exception as e:
+        st.error(f"MongoDB Connection Error: {str(e)}")
+        return None
+
+def load_data_from_mongodb():
+    """Load data from MongoDB"""
+    try:
+        client = init_mongodb_connection()
+        if client:
+            db = client[st.session_state.get('db_name', 'music_streaming')]
+            collection = db[st.session_state.get('collection_name', 'streams')]
+            
+            data = list(collection.find({}, {'_id': 0}))
+            if data:
+                df = pd.DataFrame(data)
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                return df
+            return pd.DataFrame()
+        return None
+    except Exception as e:
+        st.error(f"Error loading from MongoDB: {str(e)}")
+        return None
+
+def save_data_to_mongodb(df):
+    """Save data to MongoDB"""
+    try:
+        client = init_mongodb_connection()
+        if client:
+            db = client[st.session_state.get('db_name', 'music_streaming')]
+            collection = db[st.session_state.get('collection_name', 'streams')]
+            
+            # Clear existing data
+            collection.delete_many({})
+            
+            # Convert DataFrame to dict and insert
+            data_dict = df.to_dict('records')
+            
+            # Convert datetime to string for MongoDB
+            for record in data_dict:
+                if 'date' in record and isinstance(record['date'], pd.Timestamp):
+                    record['date'] = record['date'].strftime('%Y-%m-%d')
+            
+            if data_dict:
+                collection.insert_many(data_dict)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error saving to MongoDB: {str(e)}")
+        return False
+
+def append_data_to_mongodb(df):
+    """Append data to MongoDB"""
+    try:
+        client = init_mongodb_connection()
+        if client:
+            db = client[st.session_state.get('db_name', 'music_streaming')]
+            collection = db[st.session_state.get('collection_name', 'streams')]
+            
+            # Convert DataFrame to dict and insert
+            data_dict = df.to_dict('records')
+            
+            # Convert datetime to string for MongoDB
+            for record in data_dict:
+                if 'date' in record and isinstance(record['date'], pd.Timestamp):
+                    record['date'] = record['date'].strftime('%Y-%m-%d')
+            
+            if data_dict:
+                collection.insert_many(data_dict)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error appending to MongoDB: {str(e)}")
+        return False
+
+# Initialize MongoDB connection state
+if 'mongo_connected' not in st.session_state:
+    st.session_state.mongo_connected = False
+if 'mongo_uri' not in st.session_state:
+    st.session_state.mongo_uri = ""
+if 'db_name' not in st.session_state:
+    st.session_state.db_name = "music_streaming"
+if 'collection_name' not in st.session_state:
+    st.session_state.collection_name = "streams"
+
 # Initialize session state for data
 if 'streaming_data' not in st.session_state:
     # Generate sample data
@@ -138,6 +252,80 @@ if 'streaming_data' not in st.session_state:
 
 # Sidebar
 st.sidebar.title("🎵 Navigation")
+
+# MongoDB Connection Section in Sidebar
+with st.sidebar.expander("🔌 MongoDB Connection", expanded=not st.session_state.mongo_connected):
+    st.markdown("**Connection Type:**")
+    connection_type = st.radio(
+        "Select connection type",
+        ["Local MongoDB", "MongoDB Atlas (Cloud)"],
+        label_visibility="collapsed"
+    )
+    
+    if connection_type == "Local MongoDB":
+        st.info("💡 Make sure MongoDB is running locally on port 27017")
+        mongo_uri = st.text_input(
+            "MongoDB URI",
+            value="mongodb://localhost:27017/",
+            help="Default local MongoDB connection"
+        )
+    else:
+        st.info("💡 Get your connection string from MongoDB Atlas")
+        mongo_uri = st.text_input(
+            "MongoDB URI",
+            value=st.session_state.mongo_uri if st.session_state.mongo_uri else "",
+            type="password",
+            help="mongodb+srv://username:password@cluster.mongodb.net/"
+        )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        db_name = st.text_input("Database", value=st.session_state.db_name)
+    with col2:
+        collection_name = st.text_input("Collection", value=st.session_state.collection_name)
+    
+    if st.button("Connect to MongoDB", use_container_width=True):
+        if mongo_uri:
+            st.session_state.mongo_uri = mongo_uri
+            st.session_state.db_name = db_name
+            st.session_state.collection_name = collection_name
+            
+            # Test connection
+            client = init_mongodb_connection()
+            if client:
+                st.session_state.mongo_connected = True
+                st.success("✅ Connected to MongoDB!")
+                
+                # Load data from MongoDB
+                mongo_data = load_data_from_mongodb()
+                if mongo_data is not None and not mongo_data.empty:
+                    # Data exists in MongoDB, load it
+                    st.session_state.streaming_data = mongo_data
+                    st.success(f"Loaded {len(mongo_data)} records from MongoDB!")
+                    st.rerun()
+                else:
+                    # No data in MongoDB, upload the current sample data
+                    st.info("No data found in MongoDB. Uploading sample data...")
+                    if save_data_to_mongodb(st.session_state.streaming_data):
+                        st.success(f"✅ Uploaded {len(st.session_state.streaming_data)} sample records to MongoDB!")
+                        st.rerun()
+                    else:
+                        st.warning("Could not upload sample data to MongoDB")
+            else:
+                st.session_state.mongo_connected = False
+        else:
+            st.error("Please enter MongoDB URI")
+    
+    if st.session_state.mongo_connected:
+        st.success("🟢 MongoDB Connected")
+        if st.button("Disconnect", use_container_width=True):
+            st.session_state.mongo_connected = False
+            st.session_state.mongo_uri = ""
+            st.cache_resource.clear()
+            st.rerun()
+
+st.sidebar.markdown("---")
+
 page = st.sidebar.radio("Go to", [
     "📊 Dashboard",
     "🔍 Search & Explore",
@@ -147,7 +335,8 @@ page = st.sidebar.radio("Go to", [
     "🎯 Behavioral Metrics",
     "🤖 ML Integration",
     "📤 Upload CSV Data",
-    "📥 Data Management"
+    "📥 Data Management",
+    "🗄️ MongoDB Operations"
 ])
 
 st.sidebar.markdown("---")
@@ -599,6 +788,14 @@ elif page == "📤 Upload CSV Data":
                     
                     st.session_state.streaming_data = new_data
                     st.success("✅ Data replaced successfully!")
+                    
+                    # Save to MongoDB if connected
+                    if st.session_state.mongo_connected:
+                        if save_data_to_mongodb(new_data):
+                            st.success("✅ Data saved to MongoDB!")
+                        else:
+                            st.warning("⚠️ Could not save to MongoDB")
+                    
                     st.balloons()
             
             with col2:
@@ -611,6 +808,13 @@ elif page == "📤 Upload CSV Data":
                         st.session_state.streaming_data, new_data
                     ], ignore_index=True)
                     st.success(f"✅ Added {len(new_data):,} records!")
+                    
+                    # Append to MongoDB if connected
+                    if st.session_state.mongo_connected:
+                        if append_data_to_mongodb(new_data):
+                            st.success("✅ Data appended to MongoDB!")
+                        else:
+                            st.warning("⚠️ Could not append to MongoDB")
             
             with col3:
                 # Download processed data
@@ -715,6 +919,12 @@ elif page == "📥 Data Management":
             
             st.session_state.streaming_data = pd.DataFrame(data)
             st.success(f"✅ Generated {num_records} new records!")
+            
+            # Save to MongoDB if connected
+            if st.session_state.mongo_connected:
+                if save_data_to_mongodb(st.session_state.streaming_data):
+                    st.success("✅ Data saved to MongoDB!")
+            
             st.rerun()
     
     with tab3:
@@ -750,7 +960,226 @@ elif page == "📥 Data Management":
             
             st.session_state.streaming_data = pd.DataFrame(data)
             st.success("✅ Data reset successfully!")
+            
+            # Save to MongoDB if connected
+            if st.session_state.mongo_connected:
+                if save_data_to_mongodb(st.session_state.streaming_data):
+                    st.success("✅ Data saved to MongoDB!")
+            
             st.rerun()
+
+# ==================== MONGODB OPERATIONS ====================
+elif page == "🗄️ MongoDB Operations":
+    st.title("🗄️ MongoDB Operations")
+    
+    if not st.session_state.mongo_connected:
+        st.warning("⚠️ Please connect to MongoDB first using the sidebar.")
+        st.info("👈 Use the MongoDB Connection section in the sidebar to connect.")
+        
+        st.markdown("---")
+        st.subheader("📋 MongoDB Setup Guide")
+        
+        st.markdown("""
+        ### How to Get MongoDB URI:
+        
+        **Option 1: Local MongoDB (Easiest for Testing)**
+        1. Install MongoDB Community Edition:
+           - Windows: Download from [mongodb.com/try/download/community](https://www.mongodb.com/try/download/community)
+           - Mac: `brew install mongodb-community`
+           - Linux: Follow instructions at mongodb.com
+        2. Start MongoDB service:
+           - Windows: MongoDB service starts automatically
+           - Mac/Linux: `brew services start mongodb-community` or `sudo systemctl start mongod`
+        3. Use connection string: `mongodb://localhost:27017/`
+        
+        **Option 2: MongoDB Atlas (Cloud - Free Tier Available)**
+        1. Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+        2. Create a free account
+        3. Create a new cluster (M0 Free tier)
+        4. Click "Connect" → "Connect your application"
+        5. Copy the connection string
+        6. Replace `<password>` with your database password
+        
+        **Example URI Formats:**
+        - Local: `mongodb://localhost:27017/`
+        - Atlas: `mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/`
+        
+        ### 🔧 Troubleshooting:
+        
+        **Local MongoDB not connecting?**
+        - Make sure MongoDB is installed and running
+        - Check if port 27017 is open
+        - Try: `mongo` command in terminal to test
+        
+        **MongoDB Atlas not connecting?**
+        - Check your username and password
+        - Whitelist your IP address in Atlas Network Access
+        - Make sure you replaced `<password>` in the connection string
+        """)
+        
+    else:
+        st.success(f"🟢 Connected to MongoDB: **{st.session_state.db_name}.{st.session_state.collection_name}**")
+        
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Database Stats", "💾 Sync Operations", "🔄 Backup & Restore", "🗑️ Delete Operations"])
+        
+        with tab1:
+            st.subheader("📊 Database Statistics")
+            
+            try:
+                client = init_mongodb_connection()
+                if client:
+                    db = client[st.session_state.db_name]
+                    collection = db[st.session_state.collection_name]
+                    
+                    # Get collection stats
+                    doc_count = collection.count_documents({})
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Documents", f"{doc_count:,}")
+                    with col2:
+                        st.metric("Database", st.session_state.db_name)
+                    with col3:
+                        st.metric("Collection", st.session_state.collection_name)
+                    
+                    st.markdown("---")
+                    
+                    # Sample documents
+                    st.subheader("📄 Sample Documents")
+                    sample_docs = list(collection.find({}, {'_id': 0}).limit(10))
+                    if sample_docs:
+                        st.json(sample_docs[:3])
+                    else:
+                        st.info("No documents found in collection")
+                    
+            except Exception as e:
+                st.error(f"Error fetching stats: {str(e)}")
+        
+        with tab2:
+            st.subheader("💾 Sync Operations")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📥 Load from MongoDB")
+                st.info(f"Current local data: {len(st.session_state.streaming_data):,} records")
+                
+                if st.button("🔄 Sync from MongoDB", use_container_width=True):
+                    with st.spinner("Loading data from MongoDB..."):
+                        mongo_data = load_data_from_mongodb()
+                        if mongo_data is not None and not mongo_data.empty:
+                            st.session_state.streaming_data = mongo_data
+                            st.success(f"✅ Loaded {len(mongo_data):,} records from MongoDB!")
+                            st.rerun()
+                        elif mongo_data is not None:
+                            st.warning("⚠️ No data found in MongoDB collection")
+                        else:
+                            st.error("❌ Failed to load data from MongoDB")
+            
+            with col2:
+                st.markdown("#### 📤 Save to MongoDB")
+                st.info(f"Local data to save: {len(st.session_state.streaming_data):,} records")
+                
+                if st.button("💾 Push to MongoDB", type="primary", use_container_width=True):
+                    with st.spinner("Saving data to MongoDB..."):
+                        if save_data_to_mongodb(st.session_state.streaming_data):
+                            st.success(f"✅ Saved {len(st.session_state.streaming_data):,} records to MongoDB!")
+                        else:
+                            st.error("❌ Failed to save data to MongoDB")
+        
+        with tab3:
+            st.subheader("🔄 Backup & Restore")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 💾 Create Backup")
+                backup_name = st.text_input("Backup Name", value=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                
+                if st.button("Create Backup", use_container_width=True):
+                    try:
+                        client = init_mongodb_connection()
+                        if client:
+                            db = client[st.session_state.db_name]
+                            source_collection = db[st.session_state.collection_name]
+                            backup_collection = db[backup_name]
+                            
+                            # Copy data to backup collection
+                            data = list(source_collection.find({}))
+                            if data:
+                                backup_collection.insert_many(data)
+                                st.success(f"✅ Backup created: {backup_name}")
+                            else:
+                                st.warning("No data to backup")
+                    except Exception as e:
+                        st.error(f"Backup failed: {str(e)}")
+            
+            with col2:
+                st.markdown("#### 📂 Available Backups")
+                try:
+                    client = init_mongodb_connection()
+                    if client:
+                        db = client[st.session_state.db_name]
+                        collections = db.list_collection_names()
+                        backups = [c for c in collections if c.startswith('backup_')]
+                        
+                        if backups:
+                            selected_backup = st.selectbox("Select Backup", backups)
+                            
+                            if st.button("Restore from Backup", use_container_width=True):
+                                backup_collection = db[selected_backup]
+                                data = list(backup_collection.find({}, {'_id': 0}))
+                                
+                                if data:
+                                    df = pd.DataFrame(data)
+                                    if 'date' in df.columns:
+                                        df['date'] = pd.to_datetime(df['date'])
+                                    
+                                    st.session_state.streaming_data = df
+                                    st.success(f"✅ Restored {len(df):,} records from {selected_backup}")
+                                    st.rerun()
+                        else:
+                            st.info("No backups available")
+                except Exception as e:
+                    st.error(f"Error listing backups: {str(e)}")
+        
+        with tab4:
+            st.subheader("🗑️ Delete Operations")
+            
+            st.warning("⚠️ **Danger Zone** - These operations cannot be undone!")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🧹 Clear Collection")
+                st.info("This will delete all documents from the current collection")
+                
+                confirm_clear = st.checkbox("I understand this will delete all data")
+                if st.button("Clear Collection", disabled=not confirm_clear, use_container_width=True):
+                    try:
+                        client = init_mongodb_connection()
+                        if client:
+                            db = client[st.session_state.db_name]
+                            collection = db[st.session_state.collection_name]
+                            result = collection.delete_many({})
+                            st.success(f"✅ Deleted {result.deleted_count} documents")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+            
+            with col2:
+                st.markdown("#### 🗑️ Delete Collection")
+                st.info("This will permanently delete the entire collection")
+                
+                confirm_delete = st.checkbox("I understand this will delete the entire collection")
+                if st.button("Delete Collection", disabled=not confirm_delete, use_container_width=True):
+                    try:
+                        client = init_mongodb_connection()
+                        if client:
+                            db = client[st.session_state.db_name]
+                            db.drop_collection(st.session_state.collection_name)
+                            st.success(f"✅ Collection '{st.session_state.collection_name}' deleted")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
 
 # Footer
 st.sidebar.markdown("---")
