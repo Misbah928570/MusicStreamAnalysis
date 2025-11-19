@@ -52,13 +52,10 @@ Includes:
 - Simulated model predictions
 - AI insights (trends, anomalies, segmentation)
 
-## CSV Upload & Processing
-- Upload custom datasets in CSV format
-- Automatic preview and validation
-- Numeric and categorical statistics
-- Replace or append data
-- Download processed data
-- Includes a sample CSV template
+## MongoDB connection and operations
+- connect to localhost either local or Atlas
+- perform any operation
+- Uses document-based storage for flexible music streaming records
 
 ## Data Management
 - View current dataset
@@ -70,12 +67,18 @@ Includes:
 - Python
 - Streamlit
 - Pandas
+- MongoDB
 
 ## Installation
 pip install streamlit pandas numpy plotly
 
 ## Run the App
 streamlit run main.py
+
+## connect to mongoDB
+start mongo server 
+copy the connection string and paste
+connect
 
 ## 📁 Project Structure
 .
